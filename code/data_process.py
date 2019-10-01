@@ -54,9 +54,6 @@ class Driver_Data(Dataset):
 		return indices
 
 	def get_target_sequence(self,sequence):
-		# if len(sequence) == 0:
-		# 	print("[INFO] -> ERROR empty string found !")
-		# 	exit(0)
 		indices = [self.word2index["<GO>"]]
 		for word in sequence:
 			if word in self.word2index.keys():

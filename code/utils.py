@@ -1,15 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from constants import *
+from hyperparameters import *
 from torch.autograd import Function, Variable
 
 #Modified loss to include KL-Divergence
 class ModifiedLoss(nn.Module):
 	def __init__(self):
 		super(ModifiedLoss, self).__init__()
-		self.padding_idx = PAD_ID
-		self.criterion = nn.CrossEntropyLoss(ignore_index=self.padding_idx,reduction="sum")
+		self.criterion = nn.CrossEntropyLoss(ignore_index=PAD_ID,reduction="sum")
 		self.kld_weight = 1
 
 	def compute_batch_loss(self, outputs, targets, normalization,kld_loss):
@@ -30,7 +29,7 @@ class ModifiedLoss(nn.Module):
 	def get_accuracy(self, probs, golds):
 		probs = F.log_softmax(probs,dim=-1)
 		preds = probs.data.topk(1, dim=-1)[1]
-		non_padding = golds.ne(self.padding_idx) 
+		non_padding = golds.ne(PAD_ID) 
 		correct = preds.squeeze().eq(golds).masked_select(non_padding)
 		num_words = non_padding.long().sum()
 

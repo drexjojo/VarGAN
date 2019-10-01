@@ -65,7 +65,7 @@ class Data_Model:
 		for trace in all_traces:
 			mid = len(trace)//2
 			for i in range(4):
-				split_point = mid-2+i
+				split_point = mid+i
 				all_data.append(trace[:split_point])
 				all_targets.append(trace[split_point:])
 		

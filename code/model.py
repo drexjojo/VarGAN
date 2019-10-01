@@ -6,7 +6,7 @@ import random
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function, Variable
-from constants import *
+from hyperparameters import *
 from utils import *
 
 
@@ -69,7 +69,6 @@ class Encoder_Decoder(nn.Module):
         ael_embeddings = torch.cat(ael_embeddings, dim=1)
         return outputs,ael_embeddings
 
-
 #Conditional VAE model with AEL
 class VarGenerator(nn.Module):
     def __init__(self, vocab_size):
@@ -81,8 +80,8 @@ class VarGenerator(nn.Module):
 
         self.embedding = nn.Embedding(vocab_size, self.emb_dim)
         #Uncomment to use one-hot representation
-        # self.embedding.weight.data = torch.eye(vocab_size)
-        # self.embedding.weight.requires_grad=False
+        self.embedding.weight.data = torch.eye(vocab_size)
+        self.embedding.weight.requires_grad=False
 
         self.hidden_to_mu = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
         self.hidden_to_logsigma = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
@@ -97,12 +96,10 @@ class VarGenerator(nn.Module):
         hidden = state
         mu = self.hidden_to_mu(hidden)
         logsigma = self.hidden_to_logsigma(hidden)
-        if self.training:
-            std = logsigma.mul(0.5).exp_()
-            eps = Variable(std.data.new(std.size()).normal_())
-            z = eps.mul(std).add_(mu)
-        else:
-            z = mu
+        std = logsigma.mul(0.5).exp_()
+
+        eps = torch.randn_like(std)
+        z = eps.mul(std).add_(mu)
         return z, mu, logsigma
 
     def compute_kld(self, mu, logsigma):
@@ -125,7 +122,7 @@ class VarGenerator(nn.Module):
         outputs = []
         ael_outputs  = []
         curr_state = hidden #[1,batch_size,dec_hid_dim]
-        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #Start of seq tags
+        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #GO_ID tags
         kld = 0
 
         for i in range(1,targets.shape[1]):
@@ -142,7 +139,7 @@ class VarGenerator(nn.Module):
             if teacher_forcing:
                 next_word_embedding = self.embedding(targets[:,i].unsqueeze(1)) #[batch,1,emb_dim]
             else :
-                softmax_output = F.softmax(predicted_output.squeeze(1),dim=-1)
+                softmax_output = F.log_softmax(predicted_output.squeeze(1),dim=-1)
                 # dec_inp_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
                 next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
                 ael_outputs.append(next_word_embedding)
@@ -153,7 +150,6 @@ class VarGenerator(nn.Module):
 
         return outputs,kld,ael_outputs
         
-
 #Encoder-Decoder model with AEL and time (Not suported)
 class Encoder_Decoder_time(nn.Module):
     def __init__(self, vocab_size):
@@ -242,11 +238,11 @@ class Discriminator_CNN(nn.Module):
         self.query_CNN    = Sequence_CNN(self.emb_dim, filter_num, filter_sizes)
         self.response_CNN = Sequence_CNN(self.emb_dim, filter_num, filter_sizes)
         self.classifier   = nn.Sequential(
-                        nn.Linear(2*filter_num*len(filter_sizes), 64),
+                        nn.Linear(2*filter_num*len(filter_sizes), 32),
                         nn.ReLU(),
                         nn.Dropout(p=dropout_p),
-                        nn.Linear(64, 1),
-                        nn.Sigmoid()
+                        nn.Linear(32, 1)
+                        # nn.Sigmoid()
                     )
 
     def forward(self, query, response):
@@ -275,7 +271,6 @@ class Sequence_CNN(nn.Module):
         x = [F.relu(conv(x)).squeeze(3) for conv in self.convs]  # [(N, Co, W), ...]*len(Ks)
         x = [F.max_pool1d(i, i.size(2)).squeeze(2) for i in x]  # [(B, filter_num), ...]*len(Ks)
         return torch.cat(x, 1) # [B, all_of_features]
-
 
 #LSTM discriminator model (Not supported)
 class Discriminator_LSTM(nn.Module):

@@ -8,16 +8,16 @@ import torch.nn as nn
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from model import *
-from constants import *
+from hyperparameters import *
 from data_process import *
 from utils import *
-from similarity.damerau import Damerau
+# from similarity.damerau import Damerau
 from sklearn.metrics import f1_score, precision_score,recall_score,accuracy_score
 
 
-damerau = Damerau()
+# damerau = Damerau()
 
-SAVE_FILE = "../data/trained_models/GAN_encdec.chkpt"
+SAVE_FILE = "../data/trained_models/VarGAN.chkpt"
 
 def calculate_metric(predictions,targets,index2word):
 	LD_distance = 0
@@ -29,173 +29,114 @@ def calculate_metric(predictions,targets,index2word):
 
 	return LD_distance, LD_similarity
 
-def new_train(GAN, train_loader, opt_disc,opt_gen, device,G_loss_func):
-	GAN.generator.train()
-	GAN.discriminator.eval()
+def train_epoch(GAN, train_loader, opt_disc,opt_gen, device):
 	epoch_loss_G = 0
 	epoch_loss_D = 0
-	epoch_ppl = 0 
-	prob_fake_epoch = 0
-	prob_real_epoch = 0
 	epoch_disc_accuracy = 0
+	disc_norm = 0
 	epoch_gen_accuracy = 0
+	gen_norm = 0
 	acc_calc = ModifiedLoss().to(device)
-
-	for batch in tqdm(train_loader, mininterval=2,desc='  - (Training)   ', leave=False):
-
-		sequences,sequence_lengths,targets, target_lengths = batch
-		sequences = sequences.to(device)
-		sequence_lengths = sequence_lengths.to(device)
-		targets = targets.to(device)
-		target_lengths = target_lengths.to(device)
+	for p in GAN.generator.parameters():
+		p.required_grad = False
+	for p in GAN.discriminator.parameters():
+		p.required_grad = False
 		
-		mask = torch.gt(targets[:,1:], 0).float()
-
-		outputs,ael_responses = GAN.generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
-		_,_,gen_accuracy = acc_calc.compute_batch_loss(outputs,targets[:,1:],1,0)
-		epoch_gen_accuracy += gen_accuracy
-		fake_responses = ael_responses * (mask.unsqueeze(-1).expand_as(ael_responses))
-		
-		# temp1 = F.softmax(outputs,dim =2)
-		# temp2 = torch.max(temp1,dim=2,keepdim=True)[1].squeeze(-1)
-		# temp2 = mask * temp2
-
-		# fake_responses = GAN.generator.embedding(temp2)
-		
-		real_responses = GAN.generator.embedding(targets[:,1:]) #[batch_size,max_len,emb_dim]
-		real_responsess = real_responses * (mask.unsqueeze(-1).expand_as(real_responses))
-
-		embedded_query = GAN.generator.embedding(sequences) #[batch_size,max_len,emb_dim]
-
-		prob_real,A_real = GAN.discriminator(embedded_query, real_responses) #[batch_size, 1]
-		prob_fake,A_fake = GAN.discriminator(embedded_query, fake_responses) #[batch_size, 1]
-
-
-		# G_loss = G_loss_func(A_fake,A_real)
-		# G_loss = torch.mean(torch.log(1. - prob_fake))
-		G_loss = G_loss_func(A_fake,A_real)
-		D_loss = -torch.mean(torch.log(prob_real) + torch.log(1. - prob_fake))
-
-		epoch_loss_D += float(D_loss.item())
-		epoch_loss_G += float(G_loss.item())
-
-		opt_gen.zero_grad()
-		G_loss.backward()
-		opt_gen.step()
-
-
-		prob_fake_epoch += float(torch.mean(prob_fake).item())
-		prob_real_epoch += float(torch.mean(prob_real).item())
-		predictions = torch.cat((prob_fake.squeeze(1),prob_real.squeeze(1))).to(device)
-		real_values = torch.cat((torch.zeros(prob_fake.shape[0]),torch.ones(prob_real.shape[0]))).to(device)
-		acc = accuracy_score(real_values.detach().cpu().numpy(),torch.round(predictions).detach().cpu().numpy())
-		epoch_disc_accuracy += acc
-
-		
-
-	epoch_loss_G /= len(train_loader)
-	epoch_loss_D /= len(train_loader)
-	prob_fake_epoch /= len(train_loader)
-	prob_real_epoch /= len(train_loader)
-	epoch_gen_accuracy /= len(train_loader)
-	epoch_disc_accuracy /=len(train_loader)
-
-	return epoch_loss_D,epoch_loss_G, prob_fake_epoch, prob_real_epoch,epoch_disc_accuracy,epoch_gen_accuracy
-
-
-def train_epoch(GAN, train_loader, opt_disc,opt_gen, device,G_loss_func):
-	# GAN.generator.train()
-	# GAN.discriminator.eval()
-	epoch_loss_G = 0
-	epoch_loss_D = 0
-	epoch_ppl = 0 
-	prob_fake_epoch = 0
-	prob_real_epoch = 0
-	epoch_disc_accuracy = 0
-	epoch_gen_accuracy = 0
-	acc_calc = ModifiedLoss().to(device)
-
 	count = 0
 	for batch in tqdm(train_loader, mininterval=2,desc='  - (Training)   ', leave=False):
 
-		count += 1
-		if count%TRAINING_RATIO == 0:
-			GAN.discriminator.train()
-			GAN.generator.eval()
+		count +=1
 
-		else :
-			GAN.generator.train()
-			GAN.discriminator.eval()
+		if count % TRAINING_RATIO == 0:
+			for p in GAN.generator.decoder.parameters():
+				p.required_grad = True
+			sequences,sequence_lengths,targets, target_lengths = batch
+			sequences = sequences.to(device)
+			sequence_lengths = sequence_lengths.to(device)
+			targets = targets.to(device)
+			target_lengths = target_lengths.to(device)
 
-		sequences,sequence_lengths,targets, target_lengths = batch
-		sequences = sequences.to(device)
-		sequence_lengths = sequence_lengths.to(device)
-		targets = targets.to(device)
-		target_lengths = target_lengths.to(device)
-		
-		mask = torch.gt(targets[:,1:], 0).float()
+			mask = torch.gt(targets[:,1:], 0).float()
 
-		# outputs,kld,ael_responses = GAN.generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
-		# _,_,gen_accuracy = acc_calc.compute_batch_loss(outputs,targets[:,1:],1,kld)
-		outputs,ael_responses = GAN.generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
-		_,_,gen_accuracy = acc_calc.compute_batch_loss(outputs,targets[:,1:],1,0)
-		epoch_gen_accuracy += gen_accuracy
-		
-		fake_responses = ael_responses * (mask.unsqueeze(-1).expand_as(ael_responses))
-		
+			outputs,kld,ael_responses = GAN.generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
+			cont_outputs = outputs.contiguous().view(-1,outputs.shape[-1])
+			cont_targets = targets[:,1:].contiguous().view(-1)
+			acc_gen = acc_calc.get_accuracy(cont_outputs,cont_targets)
+			epoch_gen_accuracy += acc_gen
+			gen_norm += 1
+			# print("\n Gen_accuracy : ",acc_gen)
 
-		# fake_responses = GAN.generator.embedding(temp2)
-		
-		real_responses = GAN.generator.embedding(targets[:,1:]) #[batch_size,max_len,emb_dim]
+			embedded_query = GAN.generator.embedding(sequences) #[batch_size,max_len,emb_dim]
 
-		real_responses = real_responses * (mask.unsqueeze(-1).expand_as(real_responses))
+			real_responses = GAN.generator.embedding(targets[:,1:]) #[batch_size,max_len,emb_dim]
+			real_responses = real_responses * (mask.unsqueeze(-1).expand_as(real_responses))
+			D_real,A_real = GAN.discriminator(embedded_query, real_responses) #[batch_size, 1]
+			
+			fake_responses = ael_responses * (mask.unsqueeze(-1).expand_as(ael_responses))
+			D_fake,A_fake = GAN.discriminator(embedded_query, fake_responses) #[batch_size, 1]
+			# print(A_fake.shape)
+			# print(A_real.shape)
+			# exit(0)
+			# G_loss = -torch.mean(D_fake)
+			G_loss_calc = torch.nn.MSELoss()
+			G_loss = G_loss_calc(A_fake,A_real)
+			epoch_loss_G += G_loss
+			G_loss.backward()
+			opt_gen.step()
+			GAN.generator.zero_grad()
+			GAN.discriminator.zero_grad()
+			for p in GAN.generator.decoder.parameters():
+				p.required_grad = False
 
-		embedded_query = GAN.generator.embedding(sequences) #[batch_size,max_len,emb_dim]
 
-		if count%TRAINING_RATIO == 0:
-			fake_responses = fake_responses.detach()
-			real_responses = real_responses.detach()
-			embedded_query = embedded_query.detach()
+		else:
+			for p in GAN.discriminator.parameters():
+				p.required_grad = True
+			sequences,sequence_lengths,targets, target_lengths = batch
+			sequences = sequences.to(device)
+			sequence_lengths = sequence_lengths.to(device)
+			targets = targets.to(device)
+			target_lengths = target_lengths.to(device)
 
-		prob_real,A_real = GAN.discriminator(embedded_query, real_responses) #[batch_size, 1]
-		prob_fake,A_fake = GAN.discriminator(embedded_query, fake_responses) #[batch_size, 1]
+			mask = torch.gt(targets[:,1:], 0).float()
 
-		G_loss = G_loss_func(A_fake,A_real)
-		# G_loss = torch.mean(torch.log(1. - prob_fake))
+			real_responses = GAN.generator.embedding(targets[:,1:]) #[batch_size,max_len,emb_dim]
+			real_responses = real_responses * (mask.unsqueeze(-1).expand_as(real_responses))
+			embedded_query = GAN.generator.embedding(sequences) #[batch_size,max_len,emb_dim]
+			D_real,A_real = GAN.discriminator(embedded_query, real_responses) #[batch_size, 1]
 
-		D_loss = -torch.mean(torch.log(prob_real) + torch.log(1. - prob_fake))
+			outputs,kld,ael_responses = GAN.generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
+			fake_responses = ael_responses * (mask.unsqueeze(-1).expand_as(ael_responses))
+			D_fake,A_fake = GAN.discriminator(embedded_query, fake_responses) #[batch_size, 1]
 
-		epoch_loss_D += float(D_loss.item())
-		epoch_loss_G += float(G_loss.item())
+			predictions = torch.cat((torch.sigmoid(D_fake).squeeze(1),torch.sigmoid(D_real).squeeze(1))).to(device)
+			real_values = torch.cat((torch.zeros(D_fake.shape[0]),torch.ones(D_real.shape[0]))).to(device)
+			acc_disc = accuracy_score(real_values.detach().cpu().numpy(),torch.round(predictions).detach().cpu().numpy())
+			epoch_disc_accuracy += acc_disc
+			disc_norm += 1
 
-		if count%TRAINING_RATIO == 0:
-			opt_disc.zero_grad()
+			# print("\n Disc_accuracy : ",acc_disc)
+
+			D_loss = -(torch.mean(D_real) - torch.mean(D_fake))
+			epoch_loss_D += D_loss
 			D_loss.backward()
 			opt_disc.step()
 
-		else :
-			opt_gen.zero_grad()
-			G_loss.backward()
-			opt_gen.step()
+			for p in GAN.discriminator.parameters():
+				p.data.clamp_(-0.01,0.01)
 
+			GAN.discriminator.zero_grad()
+			GAN.generator.zero_grad()
+			for p in GAN.discriminator.parameters():
+				p.required_grad = False
+			
 
-		prob_fake_epoch += float(torch.mean(prob_fake).item())
-		prob_real_epoch += float(torch.mean(prob_real).item())
-		predictions = torch.cat((prob_fake.squeeze(1),prob_real.squeeze(1))).to(device)
-		real_values = torch.cat((torch.zeros(prob_fake.shape[0]),torch.ones(prob_real.shape[0]))).to(device)
-		acc = accuracy_score(real_values.detach().cpu().numpy(),torch.round(predictions).detach().cpu().numpy())
-		epoch_disc_accuracy += acc
+	epoch_loss_G /= gen_norm
+	epoch_loss_D /= disc_norm
+	epoch_gen_accuracy /= gen_norm
+	epoch_disc_accuracy /= disc_norm
 
-		
-
-	epoch_loss_G /= len(train_loader)
-	epoch_loss_D /= len(train_loader)
-	prob_fake_epoch /= len(train_loader)
-	prob_real_epoch /= len(train_loader)
-	epoch_gen_accuracy /= len(train_loader)
-	epoch_disc_accuracy /=len(train_loader)
-
-	return epoch_loss_D,epoch_loss_G, prob_fake_epoch, prob_real_epoch,epoch_disc_accuracy,epoch_gen_accuracy
+	return epoch_loss_D,epoch_loss_G,epoch_disc_accuracy,epoch_gen_accuracy
 
 def eval_epoch(generator,valid_loader, device,index2word):
 	generator.eval()
@@ -253,17 +194,17 @@ def eval_epoch(generator,valid_loader, device,index2word):
 	
 	return avg_LD_dist, avg_LD_sim
 
-def adversarial_training(GAN, train_loader, valid_loader, opt_disc,opt_gen, device,G_loss_func):
+def adversarial_training(GAN, train_loader, valid_loader, opt_disc,opt_gen, device):
 
 	best_acc = 0
 	for epoch_i in range(EPOCH):
 		print('[ Epoch', epoch_i, ']')
 
 		start = time.time()
-		train_loss_D, train_loss_G,p_fake,p_real,disc_accuracy,gen_accuracy = train_epoch(GAN, train_loader, opt_disc,opt_gen, device,G_loss_func)
+		train_loss_D, train_loss_G,disc_accuracy,gen_accuracy = train_epoch(GAN, train_loader, opt_disc,opt_gen, device)
 		
-		print('  - (Training)     Loss_G: {loss_G: 8.5f} || Loss_D: {loss_D: 8.5f} || Fake : {fake:8.5f} || Real : {real:8.5f} || Time Taken : {elapse:3.3f} min || Disc_accuracy : {d_acc:8.5f} || Gen_accuracy : {g_acc:8.5f}'.format(
-		loss_D=train_loss_D,loss_G=train_loss_G,d_acc=disc_accuracy,g_acc=gen_accuracy,fake=p_fake,real=p_real,elapse=(time.time()-start)/60))
+		print('  - (Training)     Loss_G: {loss_G: 8.5f} || Loss_D: {loss_D: 8.5f} || Time Taken : {elapse:3.3f} min || Disc_accuracy : {d_acc:8.5f} || Gen_accuracy : {g_acc:8.5f}'.format(
+		loss_D=train_loss_D,loss_G=train_loss_G,d_acc=disc_accuracy,g_acc=gen_accuracy,elapse=(time.time()-start)/60))
 
 		# start = time.time()
 		# LD_distance,LD_similarity = eval_epoch(GAN.generator, valid_loader, device,index2word)
@@ -361,24 +302,38 @@ def inference():
 def main():
 
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+	# device = torch.device("cpu")
 	print("[INFO] -> Using Device : ",device)
+	if device.type == 'cuda':
+		print(torch.cuda.get_device_name(1))
+		print('	Memory Usage : ')
+		print('	Allocated    : ', round(torch.cuda.memory_allocated(1)/1024**3,1), 'GB')
+		print('	Cached		 : ', round(torch.cuda.memory_cached(1)/1024**3,1), 'GB')
+
+		
+	
 	print("[INFO] -> Loading Preprocessed Data ...")
 	model_data = torch.load("../data/model_data_bpi17.pt")
 	print("[INFO] -> Done!")
 
-	# generator = VarGenerator(vocab_size=len(model_data.word2index))
-	# generator.load_state_dict(torch.load("../data/trained_models/VarGenerator.chkpt")["state_dict"])
-	generator = Encoder_Decoder(vocab_size=len(model_data.word2index))
-	generator.load_state_dict(torch.load("../data/trained_models/Encoder_Decoder.chkpt")["state_dict"])
-	discriminator = Discriminator_CNN(128,eval("[1,2]")).to(device)
-	discriminator.load_state_dict(torch.load("../data/trained_models/discriminator_CNN.chkpt")["state_dict"])
+	generator = VarGenerator(vocab_size=len(model_data.word2index))
+	generator.load_state_dict(torch.load("../data/trained_models/VarGenerator.chkpt")["state_dict"])
+	# generator = Encoder_Decoder(vocab_size=len(model_data.word2index))
+	# generator.load_state_dict(torch.load("../data/trained_models/Encoder_Decoder.chkpt")["state_dict"])
+	print("Generator : ")
+	print(generator)
+	discriminator = Discriminator_CNN(64,[1,2])
+	# discriminator.load_state_dict(torch.load("../data/trained_models/discriminator_CNN.chkpt")["state_dict"])
+	print()
+	print("Discriminator : ")
+	print(discriminator)
+
 
 	GAN = GAN_AEL(generator,discriminator).to(device)
+	
 
-	G_loss_func = nn.MSELoss()
-
-	opt_disc = optim.Adam(GAN.discriminator.parameters())
-	opt_gen  = optim.Adam(GAN.generator.decoder.parameters())
+	opt_disc = optim.RMSprop(GAN.discriminator.parameters(),lr=0.00005)
+	opt_gen  = optim.RMSprop(GAN.generator.decoder.parameters(),lr=0.00005)
 
 	train_dset = Driver_Data(
 		data    = model_data.train_data,
@@ -394,7 +349,7 @@ def main():
 
 	valid_loader = DataLoader(valid_dset, batch_size = BATCH_SIZE, shuffle = False, num_workers = 10,collate_fn=pack_collate_fn) #Load Validation data
 
-	adversarial_training(GAN, train_loader, valid_loader, opt_disc,opt_gen, device,G_loss_func)
+	adversarial_training(GAN, train_loader, valid_loader, opt_disc,opt_gen, device)
 
 if __name__ == '__main__':
 	main()

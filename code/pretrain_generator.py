@@ -8,12 +8,12 @@ import torch.nn as nn
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from model import *
-from constants import *
+from hyperparameters import *
 from data_process import *
 from utils import ModifiedLoss
 from sklearn.metrics import f1_score, precision_score,recall_score,accuracy_score
 
-SAVE_FILE = "../data/trained_models/Encoder_Decoder.chkpt"
+SAVE_FILE = "../data/trained_models/VarGenerator.chkpt"
 
 def train_epoch(generator, train_loader, optimizer, device, loss_func):
 	generator.train()
@@ -31,12 +31,12 @@ def train_epoch(generator, train_loader, optimizer, device, loss_func):
 		batch_size = sequences.shape[0]
 
 		#For Enc-Dec with AEL
-		outputs,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0.5)
-		loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,0)
+		# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0.5)
+		# loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,0)
 
 		#For Conditional VAE with AEL
-		# outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0.6)
-		# loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
+		outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0.5)
+		loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
 		
 
 		epoch_KL_loss += loss_dict["KLDLoss"]
@@ -49,8 +49,8 @@ def train_epoch(generator, train_loader, optimizer, device, loss_func):
 
 		optimizer.step()
 
-	epoch_CE_loss /= len(train_loader)
-	epoch_KL_loss /= len(train_loader)
+	epoch_CE_loss  /= len(train_loader)
+	epoch_KL_loss  /= len(train_loader)
 	epoch_accuracy /= len(train_loader)
 
 	return epoch_CE_loss,epoch_KL_loss,epoch_accuracy
@@ -71,20 +71,21 @@ def eval_epoch(generator, valid_loader, device, loss_func):
 			batch_size = sequences.shape[0]
 
 			#For Enc-Dec with AEL
-			outputs,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
-			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,0)
+			# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
+			# loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,0)
 
 			#For Conditional VAE with AEL
-			# outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
-			# loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
+			outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
+			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
 
-			epoch_KL_loss += loss_dict["KLDLoss"]
-			epoch_CE_loss += loss_dict["CELoss"]
+			epoch_KL_loss  += loss_dict["KLDLoss"]
+			epoch_CE_loss  += loss_dict["CELoss"]
 			epoch_accuracy += float(accuracy)
 				
-	epoch_CE_loss /= len(valid_loader)
-	epoch_KL_loss /= len(valid_loader)
+	epoch_CE_loss  /= len(valid_loader)
+	epoch_KL_loss  /= len(valid_loader)
 	epoch_accuracy /= len(valid_loader)
+	
 	return epoch_CE_loss,epoch_KL_loss,epoch_accuracy
 
 def train_generator(generator, train_loader, valid_loader, optimizer, device, loss_func):
@@ -178,8 +179,8 @@ def inference(device,model_data):
 	# print("avg_LD_sim  : ",avg_LD_sim/len(valid_dset))
 
 def pretrain_generator(device,model_data):
-	# generator = VarGenerator(vocab_size=len(model_data.word2index)).to(device)
-	generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
+	generator = VarGenerator(vocab_size=len(model_data.word2index)).to(device)
+	# generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
 	
 	print("\nGenerator Parameters :")
 	print(generator)
