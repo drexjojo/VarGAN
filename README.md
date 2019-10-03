@@ -7,4 +7,4 @@
 3) Pre-training discriminator
   -> python3 pretrain_discriminator.py
 4) GAN training
-  -> python3 main.py
+  -> python3 adversarial_training.py
