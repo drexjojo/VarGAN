@@ -13,7 +13,7 @@ from data_process import *
 from utils import ModifiedLoss
 from sklearn.metrics import f1_score, precision_score,recall_score,accuracy_score
 
-SAVE_FILE = "../data/trained_models/VarGenerator.chkpt"
+SAVE_FILE = "../data/trained_models/New_VarGenerator.chkpt"
 
 def train_epoch(generator, train_loader, optimizer, device, loss_func):
 	generator.train()
@@ -179,7 +179,7 @@ def inference(device,model_data):
 	# print("avg_LD_sim  : ",avg_LD_sim/len(valid_dset))
 
 def pretrain_generator(device,model_data):
-	generator = VarGenerator(vocab_size=len(model_data.word2index)).to(device)
+	generator = New_VarGenerator(vocab_size=len(model_data.word2index)).to(device)
 	# generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
 	
 	print("\nGenerator Parameters :")

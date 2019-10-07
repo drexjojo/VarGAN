@@ -70,7 +70,7 @@ class Encoder_Decoder(nn.Module):
         return outputs,ael_embeddings
 
 #Conditional VAE model with AEL
-class VarGenerator(nn.Module):
+class Old_VarGenerator(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
         
@@ -150,6 +150,90 @@ class VarGenerator(nn.Module):
 
         return outputs,kld,ael_outputs
         
+#New VAE
+class New_VarGenerator(nn.Module):
+    def __init__(self, vocab_size):
+        super().__init__()
+        
+        self.emb_dim = EMBEDDING_DIM
+        self.enc_hidden_dim = HIDDEN_SIZE
+        self.dec_hidden_dim = 2*self.enc_hidden_dim
+
+        self.embedding = nn.Embedding(vocab_size, self.emb_dim)
+        #Uncomment to use one-hot representation
+        # self.embedding.weight.data = torch.eye(vocab_size)
+        # self.embedding.weight.requires_grad=False
+
+        self.hidden_to_mu = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
+        self.hidden_to_logsigma = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
+        self.activation_function = nn.ReLU()
+
+        self.encoder = nn.GRU(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
+        self.decoder = nn.GRU(self.emb_dim+self.enc_hidden_dim, self.dec_hidden_dim, batch_first=True)
+        self.dense = nn.Linear(self.dec_hidden_dim, vocab_size)
+        self.dropout = nn.Dropout(DROPOUT)
+
+    def reparameterize(self,state):
+        hidden = state
+        mu = self.hidden_to_mu(hidden)
+        logsigma = self.hidden_to_logsigma(hidden)
+        std = logsigma.mul(0.5).exp_()
+
+        eps = torch.randn_like(std)
+        z = eps.mul(std).add_(mu)
+        return z, mu, logsigma
+
+    def compute_kld(self, mu, logsigma):
+        kld = -0.5 * torch.sum(1+ logsigma - mu.pow(2) - logsigma.exp())
+        return kld
+            
+    def forward(self, sequences, sequence_lengths, targets, target_lengths,tf_ratio=0.5):
+        ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]
+            targets   = [batch_size,max_len2], target_lengths = [batch_size] 
+            tf_ratio = TeacherForcing Ratio'''
+
+
+        #---------Encoder----------------------------------------------------
+        embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
+        embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
+        _, hidden  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        #--------------------------------------------------------------------
+        
+        outputs = []
+        ael_outputs  = []
+        curr_state = hidden #[1,batch_size,dec_hid_dim]
+        z, mu, logsigma = self.reparameterize(curr_state.squeeze(0)) # z,mu,logsigma=[batch,enc_hid_dim]
+        kld = self.compute_kld(mu, logsigma)
+        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #GO_ID tags
+
+        for i in range(1,targets.shape[1]):
+          
+            
+            decoder_input = torch.cat([next_word_embedding, z.unsqueeze(1)], -1)
+            output, curr_state = self.decoder(decoder_input, curr_state) #output = [batch_size,1,dec_hid_dim]
+            output = self.dropout(output)
+            predicted_output = self.dense(output) #[batch,1,vocab_size]
+            outputs.append(predicted_output)
+
+            teacher_forcing = random.random() < tf_ratio
+            if teacher_forcing:
+                next_word_embedding = self.embedding(targets[:,i].unsqueeze(1)) #[batch,1,emb_dim]
+            else :
+                softmax_output = F.log_softmax(predicted_output.squeeze(1),dim=-1)
+                # dec_inp_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
+                next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+                ael_outputs.append(next_word_embedding)
+                # next_word_embedding = self.embedding(dec_inp_var)
+
+        outputs = torch.cat(outputs, dim=1)
+        ael_outputs = torch.cat(ael_outputs,dim=1)
+
+        return outputs,kld,ael_outputs
+
+
+
+
 #Encoder-Decoder model with AEL and time (Not suported)
 class Encoder_Decoder_time(nn.Module):
     def __init__(self, vocab_size):

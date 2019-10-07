@@ -52,7 +52,7 @@ def train_epoch(GAN, train_loader, opt_disc,opt_gen, device):
 
 		count +=1
 
-		if count % TRAINING_RATIO == 0:
+		if count % TRAINING_RATIO != 0:
 			GAN.generator.zero_grad()
 			opt_gen.zero_grad()
 
@@ -104,8 +104,7 @@ def train_epoch(GAN, train_loader, opt_disc,opt_gen, device):
 			for p in GAN.discriminator.parameters():
 				p.data.clamp_(-c_t,c_t)
 
-
-
+	
 	epoch_loss_G /= gen_norm
 	epoch_loss_D /= disc_norm
 	epoch_gen_accuracy /= gen_norm
@@ -291,8 +290,8 @@ def main():
 	model_data = torch.load("../data/model_data_bpi17.pt",map_location='cpu')
 	print("[INFO] -> Done!")
 
-	generator = VarGenerator(vocab_size=len(model_data.word2index))
-	generator.load_state_dict(torch.load("../data/trained_models/VarGenerator.chkpt",map_location='cpu' )["state_dict"])
+	generator = New_VarGenerator(vocab_size=len(model_data.word2index))
+	generator.load_state_dict(torch.load("../data/trained_models/New_VarGenerator.chkpt",map_location='cpu' )["state_dict"])
 	# generator = Encoder_Decoder(vocab_size=len(model_data.word2index))
 	# generator.load_state_dict(torch.load("../data/trained_models/Encoder_Decoder.chkpt")["state_dict"])
 	print("Generator : ")
@@ -308,7 +307,7 @@ def main():
 	
 
 	opt_disc = optim.RMSprop(GAN.discriminator.parameters(),lr=0.00005)
-	opt_gen  = optim.RMSprop(GAN.generator.decoder.parameters(),lr=0.00005)
+	opt_gen  = optim.RMSprop(GAN.generator.decoder.parameters(),lr=0.05)
 
 	train_dset = Driver_Data(
 		data    = model_data.train_data,
