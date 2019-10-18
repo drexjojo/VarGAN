@@ -11,7 +11,7 @@ class ModifiedLoss(nn.Module):
 		self.criterion = nn.CrossEntropyLoss(ignore_index=PAD_ID,reduction="sum")
 		self.kld_weight = 1
 
-	def compute_batch_loss(self, outputs, targets, normalization,kld_loss):
+	def compute_batch_loss(self, outputs, targets, normalization,kld_loss=0):
 		cont_outputs = outputs.contiguous().view(-1,outputs.shape[-1])
 		cont_targets = targets.contiguous().view(-1)
 		ce_loss = self.criterion(cont_outputs, cont_targets)
@@ -27,7 +27,7 @@ class ModifiedLoss(nn.Module):
 		return loss, loss_dict, accuracy
 
 	def get_accuracy(self, probs, golds):
-		probs = F.log_softmax(probs,dim=-1)
+		probs = F.softmax(probs,dim=-1)
 		preds = probs.data.topk(1, dim=-1)[1]
 		non_padding = golds.ne(PAD_ID) 
 		correct = preds.squeeze().eq(golds).masked_select(non_padding)

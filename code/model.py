@@ -28,23 +28,62 @@ class Encoder_Decoder(nn.Module):
         self.decoder = nn.LSTM(self.emb_dim, self.dec_hidden_dim, batch_first=True)
         self.dense = nn.Linear(self.dec_hidden_dim, vocab_size)
         self.dropout = nn.Dropout(DROPOUT)
-            
-    def forward(self, sequences, sequence_lengths, targets, target_lengths,tf_ratio=0.5): 
-        ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]
-            targets   = [batch_size,max_len2], target_lengths = [batch_size] 
-            tf_ratio = TeacherForcing Ratio'''
 
+    def next_activity_prediction(self,sequences,sequence_lengths,targets):
+        ''' targets = [batch_size,2]'''
 
+        outputs = []
+        ael_outputs = []
         #-----------Encoder--------------------------------------------------
         embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
         embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
+
+        #For LSTM
+        # _, (hidden,cell)  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+
+        #For GRU
+        _, hidden  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        #-------------------------------------------------------------------
+
+        GO_embeddings = self.embedding(targets[:,0].unsqueeze(1))
+
+        #For LSTM
+        # output, (hidden,cell) = self.decoder(GO_embeddings, (hidden,cell)) #output = [batch_size,1,hidden]
+
+        #For GRU
+        output, hidden = self.decoder(GO_embeddings, hidden) #output = [batch_size,1,hidden]
+
+        output = self.dense(output) # [batch_size, 1 , vocab_size]
+        outputs.append(output)
+        softmax_output = F.softmax(output.squeeze(1),dim=1)
+        ael_output = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+        ael_outputs.append(ael_output)
+        outputs = torch.cat(outputs, dim=1)
+        ael_outputs = torch.cat(ael_outputs, dim=1)
+
+        return outputs,ael_outputs
+    
+    def suffix_prediction(self,sequences,sequence_lengths,targets):
+        
+        #-----------Encoder--------------------------------------------------
+        embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
+        embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
+        
+        #For LSTM
         _, (hidden,cell)  = self.encoder(embedded_inputs)
         hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
         cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+
+        #For GRU
+        # _, hidden  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
         #-------------------------------------------------------------------
                     
         outputs = []
-        ael_embeddings = []
+        ael_outputs = []
         curr_state = hidden #[1,batch_size,hidden_size]
         curr_cell = cell
         next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #Start of sequence tags
@@ -54,20 +93,36 @@ class Encoder_Decoder(nn.Module):
             output = self.dense(output) # [batch_size, 1 , vocab_size]
             outputs.append(output)
             softmax_output = F.softmax(output.squeeze(1),dim=1)
+            next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+            ael_outputs.append(next_word_embedding)
             # dec_inp_var = torch.max(softmax_output,dim=1,keepdim=True)[1] #[batch_size,1]
-            teacher_forcing = random.random() < tf_ratio
-            if teacher_forcing :
-                ael_output = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
-                ael_embeddings.append(ael_output)
-                next_word_embedding = self.embedding(targets[:,i].unsqueeze(1))
+            # teacher_forcing = random.random() < tf_ratio
+            # if teacher_forcing :
+            #     ael_output = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+            #     ael_embeddings.append(ael_output)
+            #     next_word_embedding = self.embedding(targets[:,i].unsqueeze(1))
 
-            else :
-                next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
-                ael_embeddings.append(next_word_embedding)
+            # else :
+            #     next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+            #     ael_embeddings.append(next_word_embedding)
 
         outputs = torch.cat(outputs, dim=1)
-        ael_embeddings = torch.cat(ael_embeddings, dim=1)
-        return outputs,ael_embeddings
+        ael_outputs = torch.cat(ael_outputs, dim=1)
+
+        return outputs,ael_outputs
+
+    def forward(self, sequences, sequence_lengths, targets,task): 
+        ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]
+            targets   = [batch_size,max_len2] '''
+
+        if task =="next_activity_prediction":
+           outputs,ael_outputs = self.next_activity_prediction(sequences,sequence_lengths,targets[:,:2])
+
+        elif task == "suffix_prediction":
+            outputs,ael_outputs = self.suffix_prediction(sequences,sequence_lengths,targets)
+
+        
+        return outputs,ael_outputs
 
 #Conditional VAE model with AEL
 class Old_VarGenerator(nn.Module):
@@ -155,21 +210,21 @@ class New_VarGenerator(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
         
-        self.emb_dim = EMBEDDING_DIM
+        self.emb_dim = vocab_size
         self.enc_hidden_dim = HIDDEN_SIZE
         self.dec_hidden_dim = 2*self.enc_hidden_dim
 
         self.embedding = nn.Embedding(vocab_size, self.emb_dim)
         #Uncomment to use one-hot representation
-        # self.embedding.weight.data = torch.eye(vocab_size)
-        # self.embedding.weight.requires_grad=False
+        self.embedding.weight.data = torch.eye(vocab_size)
+        self.embedding.weight.requires_grad=False
 
-        self.hidden_to_mu = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
-        self.hidden_to_logsigma = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
+        self.hidden_to_mu = nn.Linear(self.dec_hidden_dim,self.dec_hidden_dim)
+        self.hidden_to_logsigma = nn.Linear(self.dec_hidden_dim,self.dec_hidden_dim)
         self.activation_function = nn.ReLU()
 
         self.encoder = nn.GRU(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
-        self.decoder = nn.GRU(self.emb_dim+self.enc_hidden_dim, self.dec_hidden_dim, batch_first=True)
+        self.decoder = nn.GRU(self.emb_dim, self.dec_hidden_dim, batch_first=True)
         self.dense = nn.Linear(self.dec_hidden_dim, vocab_size)
         self.dropout = nn.Dropout(DROPOUT)
 
@@ -186,13 +241,48 @@ class New_VarGenerator(nn.Module):
     def compute_kld(self, mu, logsigma):
         kld = -0.5 * torch.sum(1+ logsigma - mu.pow(2) - logsigma.exp())
         return kld
+
+    def next_activity_prediction(self,sequences,sequence_lengths,targets):
+        ''' targets = [batch_size,2]'''
+
+        outputs = []
+        ael_outputs = []
+        #-----------Encoder--------------------------------------------------
+        embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
+        embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
+
+        #For LSTM
+        # _, (hidden,cell)  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+
+        #For GRU
+        _, hidden  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        #-------------------------------------------------------------------
+
+        z, mu, logsigma = self.reparameterize(hidden.squeeze(0)) # z,mu,logsigma=[batch,enc_hid_dim]
+        kld = self.compute_kld(mu, logsigma)
+
+        GO_embeddings = self.embedding(targets[:,0].unsqueeze(1))
+        
+        #For LSTM
+        # output, (hidden,cell) = self.decoder(GO_embeddings, (z.unsqueeze(0),cell)) #output = [batch_size,1,hidden]
+
+        #For GRU
+        output, hidden = self.decoder(GO_embeddings, z.unsqueeze(0)) #output = [batch_size,1,hidden]
+
+        output = self.dense(output) # [batch_size, 1 , vocab_size]
+        outputs.append(output)
+        softmax_output = F.softmax(output.squeeze(1),dim=1)
+        ael_output = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+        ael_outputs.append(ael_output)
+        outputs = torch.cat(outputs, dim=1)
+        ael_outputs = torch.cat(ael_outputs, dim=1)
+
+        return outputs,kld,ael_outputs
             
-    def forward(self, sequences, sequence_lengths, targets, target_lengths,tf_ratio=0.5):
-        ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]
-            targets   = [batch_size,max_len2], target_lengths = [batch_size] 
-            tf_ratio = TeacherForcing Ratio'''
-
-
+    def suffix_prediction(self,sequences,sequence_lengths,targets):
         #---------Encoder----------------------------------------------------
         embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
         embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
@@ -231,8 +321,17 @@ class New_VarGenerator(nn.Module):
 
         return outputs,kld,ael_outputs
 
+    def forward(self, sequences, sequence_lengths, targets,task):
+        ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]
+            targets   = [batch_size,max_len2]'''
 
+        if task =="next_activity_prediction":
+           outputs,kld,ael_outputs = self.next_activity_prediction(sequences,sequence_lengths,targets[:,:2])
 
+        elif task == "suffix_prediction":
+            outputs,kld,ael_outputs = self.suffix_prediction(sequences,sequence_lengths,targets)
+
+        return outputs,kld,ael_outputs
 
 #Encoder-Decoder model with AEL and time (Not suported)
 class Encoder_Decoder_time(nn.Module):

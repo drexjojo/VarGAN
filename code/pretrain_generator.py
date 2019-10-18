@@ -12,8 +12,11 @@ from hyperparameters import *
 from data_process import *
 from utils import ModifiedLoss
 from sklearn.metrics import f1_score, precision_score,recall_score,accuracy_score
+from jellyfish import damerau_levenshtein_distance
 
-SAVE_FILE = "../data/trained_models/New_VarGenerator.chkpt"
+
+SAVE_FILE = "../data/Helpdesk/trained_models/New_VarGAN.chkpt"
+TASK = "suffix_prediction"
 
 def train_epoch(generator, train_loader, optimizer, device, loss_func):
 	generator.train()
@@ -27,16 +30,19 @@ def train_epoch(generator, train_loader, optimizer, device, loss_func):
 		sequences = sequences.to(device)
 		sequence_lengths = sequence_lengths.to(device)
 		targets = targets.to(device)
-		target_lengths = target_lengths.to(device)
 		batch_size = sequences.shape[0]
 
 		#For Enc-Dec with AEL
-		# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0.5)
-		# loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,0)
-
+		outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+		
 		#For Conditional VAE with AEL
-		outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0.5)
-		loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
+		# outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+
+		if TASK == "next_activity_prediction":
+			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size)
+
+		elif TASK =="suffix_prediction":
+			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size)
 		
 
 		epoch_KL_loss += loss_dict["KLDLoss"]
@@ -71,12 +77,16 @@ def eval_epoch(generator, valid_loader, device, loss_func):
 			batch_size = sequences.shape[0]
 
 			#For Enc-Dec with AEL
-			# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
-			# loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,0)
+			outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
 
 			#For Conditional VAE with AEL
-			outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,target_lengths,tf_ratio=0)
-			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
+			# outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+
+			if TASK == "next_activity_prediction":
+				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size)
+
+			elif TASK =="suffix_prediction":
+				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size)
 
 			epoch_KL_loss  += loss_dict["KLDLoss"]
 			epoch_CE_loss  += loss_dict["CELoss"]
@@ -115,20 +125,19 @@ def train_generator(generator, train_loader, valid_loader, optimizer, device, lo
 			torch.save(checkpoint, SAVE_FILE)
 			print('[INFO] -> The checkpoint file has been updated.')
 
-#Notsupported
 def inference(device,model_data):
 
-	generator = VarGenerator(vocab_size=len(model_data.word2index)).to(device)
-	generator.load_state_dict(torch.load("../data/trained_models/VarGenerator.chkpt")["state_dict"])
+	generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
+	generator.load_state_dict(torch.load(SAVE_FILE)["state_dict"])
 	loss_func = ModifiedLoss().to(device)
 
 	
 	valid_dset = Driver_Data(
-		data = model_data.test_data,
-		targets = model_data.test_targets,
+		data = model_data.test_prefixes,
+		targets = model_data.test_sufixes,
 		word2index = model_data.word2index)
 
-	valid_loader = DataLoader(valid_dset, batch_size = 1, shuffle = False, num_workers = 10,collate_fn=pack_collate_fn) #Load Validation data
+	valid_loader = DataLoader(valid_dset, batch_size = 1, shuffle = False, num_workers = 1,collate_fn=pack_collate_fn) #Load Validation data
 	generator.eval()
 	avg_acc = 0
 	counter = 0
@@ -136,6 +145,9 @@ def inference(device,model_data):
 		for batch in valid_loader:
 			counter += 1
 			sequences,sequence_lengths,targets, target_lengths = batch
+			print(sequences.shape)
+			print(targets.shape)
+			exit(0)
 			sequences = sequences.to(device)
 			targets = targets.to(device)
 
@@ -179,8 +191,7 @@ def inference(device,model_data):
 	# print("avg_LD_sim  : ",avg_LD_sim/len(valid_dset))
 
 def pretrain_generator(device,model_data):
-	generator = New_VarGenerator(vocab_size=len(model_data.word2index)).to(device)
-	# generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
+	generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
 	
 	print("\nGenerator Parameters :")
 	print(generator)
@@ -190,15 +201,15 @@ def pretrain_generator(device,model_data):
 	optimizer = optim.Adam(generator.parameters())
 
 	train_dset = Driver_Data(
-		data    = model_data.train_data,
-		targets = model_data.train_targets,
+		data    = model_data.train_prefixes,
+		targets = model_data.train_sufixes,
 		word2index = model_data.word2index)
 
 	train_loader = DataLoader(train_dset, batch_size = BATCH_SIZE,shuffle = True, num_workers = 10,collate_fn=pack_collate_fn) #Load training data
 
 	valid_dset = Driver_Data(
-		data = model_data.test_data,
-		targets = model_data.test_targets,
+		data = model_data.test_prefixes,
+		targets = model_data.test_sufixes,
 		word2index = model_data.word2index)
 
 	valid_loader = DataLoader(valid_dset, batch_size = BATCH_SIZE, shuffle = False, num_workers = 10,collate_fn=pack_collate_fn) #Load Validation data
@@ -208,11 +219,10 @@ if __name__ == '__main__':
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 	print("[INFO] -> Using Device : ",device)
 	print("[INFO] -> Loading Preprocessed Data ...")
-	model_data = torch.load("../data/model_data_bpi17.pt")
+	model_data = torch.load("../data/Helpdesk/helpdesk.pt")
 	print("[INFO] -> Done!")
 
 	#-----------FOR TRAINING------------------------------------
 	pretrain_generator(device,model_data)
-
 	#-----------FOR INFERENCE------------------------------------
-	# inference(device,model_data)
+	inference(device,model_data)

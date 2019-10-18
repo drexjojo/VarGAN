@@ -307,7 +307,7 @@ def main():
 	
 
 	opt_disc = optim.RMSprop(GAN.discriminator.parameters(),lr=0.00005)
-	opt_gen  = optim.RMSprop(GAN.generator.decoder.parameters(),lr=0.05)
+	opt_gen  = optim.RMSprop(GAN.generator.decoder.parameters(),lr=0.0005)
 
 	train_dset = Driver_Data(
 		data    = model_data.train_data,

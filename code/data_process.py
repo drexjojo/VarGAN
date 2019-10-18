@@ -4,25 +4,17 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 class Data_Model:
-	"""
-		Class to load the data.
-		Load using torch.load("file path")
-	"""
 	def __init__(self, name):
-
 		self.name = name
-		self.train_data = []
-		self.train_targets = []
-		self.test_data = []
-		self.test_targets = []
+		self.train_prefixes = []
+		self.train_sufixes = []
+		self.test_prefixes = []
+		self.test_sufixes = []
 		self.word2index = {}
 		self.index2word = {}
+
 	
 class Driver_Data(Dataset):
-	"""
-	Class to pass data to the model for training & validation.
-	Inherits Pytorch Dataset
-	"""
 	def __init__(self,data,targets,word2index):
 		self.data = data
 		self.targets = targets
