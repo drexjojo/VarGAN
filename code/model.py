@@ -9,6 +9,7 @@ from torch.autograd import Function, Variable
 from hyperparameters import *
 from utils import *
 
+TF = 1
 
 #Encoder-Decoder model with AEL
 class Encoder_Decoder(nn.Module):
@@ -76,40 +77,73 @@ class Encoder_Decoder(nn.Module):
         _, (hidden,cell)  = self.encoder(embedded_inputs)
         hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
         cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
+        curr_cell = cell
 
         #For GRU
         # _, hidden  = self.encoder(embedded_inputs)
         # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
         #-------------------------------------------------------------------
                     
         outputs = []
         ael_outputs = []
-        curr_state = hidden #[1,batch_size,hidden_size]
-        curr_cell = cell
+        
         next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #Start of sequence tags
 
         for i in range(1,targets.shape[1]):               
             output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (curr_state,curr_cell)) #output = [batch_size,1,hidden]
+            # output, curr_state = self.decoder(next_word_embedding, curr_state) #output = [batch_size,1,hidden]
             output = self.dense(output) # [batch_size, 1 , vocab_size]
             outputs.append(output)
             softmax_output = F.softmax(output.squeeze(1),dim=1)
             next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
             ael_outputs.append(next_word_embedding)
-            # dec_inp_var = torch.max(softmax_output,dim=1,keepdim=True)[1] #[batch_size,1]
-            # teacher_forcing = random.random() < tf_ratio
-            # if teacher_forcing :
-            #     ael_output = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
-            #     ael_embeddings.append(ael_output)
-            #     next_word_embedding = self.embedding(targets[:,i].unsqueeze(1))
-
-            # else :
-            #     next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
-            #     ael_embeddings.append(next_word_embedding)
+            
+            teacher_forcing = random.random() < TF
+            if teacher_forcing :
+                next_word_embedding = self.embedding(targets[:,i].unsqueeze(1))
 
         outputs = torch.cat(outputs, dim=1)
         ael_outputs = torch.cat(ael_outputs, dim=1)
 
         return outputs,ael_outputs
+
+    def infer(self,sequences,sequence_lengths,targets):
+        #-----------Encoder--------------------------------------------------
+        embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
+        embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
+        
+        #For LSTM
+        _, (hidden,cell)  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
+        curr_cell = cell
+
+        #For GRU
+        # _, hidden  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
+        #-------------------------------------------------------------------
+
+        predictions = []
+        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim]
+
+        counter = 0
+        while True:
+            counter += 1
+            output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (curr_state,curr_cell)) #output = [batch_size,1,hidden]
+            # output, curr_state = self.decoder(next_word_embedding, curr_state) #output = [batch_size,1,hidden]
+            output = self.dense(output) # [batch_size, 1 , vocab_size]
+            softmax_output = F.softmax(output.squeeze(1),dim=1)
+            pred_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
+            predictions.append(pred_var.item())
+            if pred_var.item() == EOS_ID or len(predictions) > MAX_SUFX_LENGTH :
+                break
+            next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+
+        return predictions
 
     def forward(self, sequences, sequence_lengths, targets,task): 
         ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]

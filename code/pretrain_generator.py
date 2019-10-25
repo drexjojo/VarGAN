@@ -12,8 +12,11 @@ from hyperparameters import *
 from data_process import *
 from utils import ModifiedLoss
 from sklearn.metrics import f1_score, precision_score,recall_score,accuracy_score
-from jellyfish import damerau_levenshtein_distance
-
+# from jellyfish import damerau_levenshtein_distance
+from strsimpy.damerau import Damerau
+from strsimpy.optimal_string_alignment import OptimalStringAlignment
+DL_cal = Damerau()
+OSA_cal = OptimalStringAlignment()
 
 SAVE_FILE = "../data/Helpdesk/trained_models/New_VarGAN.chkpt"
 TASK = "suffix_prediction"
@@ -108,7 +111,7 @@ def train_generator(generator, train_loader, valid_loader, optimizer, device, lo
 		train_CE_loss,train_KL_loss,train_acc = train_epoch(generator, train_loader, optimizer, device, loss_func)
 		print('  - (Training)       CE_Loss: {ce_loss: 8.5f} ||  KL_Loss: {kl_loss: 8.5f} || Accuracy: {acc:3.3f} || Time Taken: {elapse:3.3f} min'.format(
 		ce_loss=train_CE_loss,kl_loss=train_KL_loss,acc=train_acc,elapse=(time.time()-start)/60))
-
+	
 		start = time.time()
 		valid_CE_loss,valid_KL_loss,valid_acc = eval_epoch(generator, valid_loader, device, loss_func)
 		print('  - (Validating)     CE_Loss: {ce_loss: 8.5f} ||  KL_Loss: {kl_loss: 8.5f} || Accuracy: {acc:3.3f} || Time Taken: {elapse:3.3f} min'.format(
@@ -125,12 +128,9 @@ def train_generator(generator, train_loader, valid_loader, optimizer, device, lo
 			torch.save(checkpoint, SAVE_FILE)
 			print('[INFO] -> The checkpoint file has been updated.')
 
-def inference(device,model_data):
+def inference(generator, device, model_data):
 
-	generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
 	generator.load_state_dict(torch.load(SAVE_FILE)["state_dict"])
-	loss_func = ModifiedLoss().to(device)
-
 	
 	valid_dset = Driver_Data(
 		data = model_data.test_prefixes,
@@ -139,64 +139,47 @@ def inference(device,model_data):
 
 	valid_loader = DataLoader(valid_dset, batch_size = 1, shuffle = False, num_workers = 1,collate_fn=pack_collate_fn) #Load Validation data
 	generator.eval()
-	avg_acc = 0
-	counter = 0
+
+	avg_DL = 0
+	avg_OSA = 0
 	with torch.no_grad():
 		for batch in valid_loader:
-			counter += 1
 			sequences,sequence_lengths,targets, target_lengths = batch
-			print(sequences.shape)
-			print(targets.shape)
-			exit(0)
 			sequences = sequences.to(device)
 			targets = targets.to(device)
-
-			embedded_inputs = generator.embedding(sequences) #[batch,max_len,emb_dim]
-			_, hidden  = generator.encoder(embedded_inputs)
-			hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
-
-			predictions = []
-			outputs = []
-			curr_state = hidden #[1,batch_size,hidden_size]
-			next_word_embedding = generator.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim]
-
-			while True:
-				z, mu, logsigma = generator.reparameterize(curr_state.squeeze(0)) 
-				decoder_input = torch.cat([next_word_embedding, z.unsqueeze(1)], -1)
-				output, curr_state = generator.decoder(decoder_input, curr_state) #output = [batch_size,1,dec_hid_dim]  
-				predicted_output = generator.dense(output)
-				softmax_output = F.log_softmax(predicted_output.squeeze(1),dim=-1)
-				dec_inp_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
-				predictions.append(dec_inp_var.item())
-				next_word_embedding = torch.mm(softmax_output,generator.embedding.weight).unsqueeze(1)
-				if dec_inp_var.item() == EOS_ID or len(predictions) > 60 :
-					break
-
-			# outputs = torch.cat(outputs,dim =1)
-			# accuracy = loss_func.get_accuracy()
+			predictions = generator.infer(sequences,sequence_lengths,targets)
 			
+			try:
+				prefix = " ".join([model_data.index2word[i] for i in sequences.squeeze().cpu().numpy().tolist()])
+			except TypeError as e:
+				prefix = " ".join([model_data.index2word[sequences.item()]])
 			
-			print("-------------------------------------------")
-			print(counter,"/",len(valid_dset))
-			print("Input           : "," ".join([model_data.index2word[i] for i in sequences.squeeze().cpu().numpy().tolist()]))
-			print("Predicted       : "," ".join([model_data.index2word[i] for i in predictions]))
-			print("Target          : "," ".join([model_data.index2word[i] for i in targets.squeeze().cpu().numpy().tolist()][1:]))
-			# print("LD_distance     : ",LD_distance)
-			# print("LD_similarity   : ",LD_similarity)
-			print("-------------------------------------------")
-			print()
-			# avg_LD_dist += LD_distance
-			# avg_LD_sim += LD_similarity
-	# print("avg_LD_dist : ",avg_LD_dist/len(valid_dset))
-	# print("avg_LD_sim  : ",avg_LD_sim/len(valid_dset))
+			try:
+				true_suffix = " ".join([model_data.index2word[i] for i in targets.squeeze().cpu().numpy().tolist()][1:])
+			except TypeError as e:
+				true_suffix = " ".join([model_data.index2word[targets.item()]])
+				
+			predicted_suffix = " ".join([model_data.index2word[i] for i in predictions])
+			
 
-def pretrain_generator(device,model_data):
-	generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
-	
-	print("\nGenerator Parameters :")
-	print(generator)
-	print(f'The model has {sum(p.numel() for p in generator.parameters() if p.requires_grad):,} trainable parameters\n')
+			DL_similarity  = 1 - (DL_cal.distance(true_suffix, predicted_suffix)/max(len(true_suffix),len(predicted_suffix)))
+			OSA_similarity = 1 - (OSA_cal.distance(true_suffix, predicted_suffix)/max(len(true_suffix),len(predicted_suffix)))
 
+			# print("-------------------------------------------")
+			# print("Input             : ",prefix)
+			# print("Predicted         : ",predicted_suffix)
+			# print("Target            : ",true_suffix)
+			# print("LD_similarity     : ",DL_similarity)
+			# print("OSA_similarity    : ",OSA_similarity)
+			# print("-------------------------------------------")
+			# print()
+			avg_DL  += DL_similarity
+			avg_OSA += OSA_similarity
+
+	print("Avg DL similarity   : ",avg_DL/len(valid_dset))
+	print("Avg OSA similarity  : ",avg_OSA/len(valid_dset))
+
+def pretrain_generator(device,model_data,generator):
 	loss_func = ModifiedLoss().to(device)
 	optimizer = optim.Adam(generator.parameters())
 
@@ -222,7 +205,14 @@ if __name__ == '__main__':
 	model_data = torch.load("../data/Helpdesk/helpdesk.pt")
 	print("[INFO] -> Done!")
 
+	generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
+	print("\nGenerator Parameters :")
+	print(generator)
+	print(f'The model has {sum(p.numel() for p in generator.parameters() if p.requires_grad):,} trainable parameters\n')
+
+
 	#-----------FOR TRAINING------------------------------------
-	pretrain_generator(device,model_data)
+	pretrain_generator(device,model_data,generator)
 	#-----------FOR INFERENCE------------------------------------
-	inference(device,model_data)
+	if TASK == "suffix_prediction":
+		inference(generator,device,model_data)
