@@ -9,7 +9,7 @@ from torch.autograd import Function, Variable
 from hyperparameters import *
 from utils import *
 
-TF = 1
+TF = 0.5
 
 #Encoder-Decoder model with AEL
 class Encoder_Decoder(nn.Module):
@@ -25,8 +25,8 @@ class Encoder_Decoder(nn.Module):
         # self.embedding.weight.data = torch.eye(vocab_size)
         # self.embedding.weight.requires_grad=False
 
-        self.encoder = nn.LSTM(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
-        self.decoder = nn.LSTM(self.emb_dim, self.dec_hidden_dim, batch_first=True)
+        self.encoder = nn.GRU(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
+        self.decoder = nn.GRU(self.emb_dim, self.dec_hidden_dim, batch_first=True)
         self.dense = nn.Linear(self.dec_hidden_dim, vocab_size)
         self.dropout = nn.Dropout(DROPOUT)
 
@@ -74,16 +74,16 @@ class Encoder_Decoder(nn.Module):
         embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
         
         #For LSTM
-        _, (hidden,cell)  = self.encoder(embedded_inputs)
-        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
-        cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
-        curr_state = hidden #[1,batch_size,hidden_size]
-        curr_cell = cell
+        # _, (hidden,cell)  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
+        # curr_cell = cell
 
         #For GRU
-        # _, hidden  = self.encoder(embedded_inputs)
-        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
-        # curr_state = hidden #[1,batch_size,hidden_size]
+        _, hidden  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
         #-------------------------------------------------------------------
                     
         outputs = []
@@ -92,8 +92,8 @@ class Encoder_Decoder(nn.Module):
         next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #Start of sequence tags
 
         for i in range(1,targets.shape[1]):               
-            output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (curr_state,curr_cell)) #output = [batch_size,1,hidden]
-            # output, curr_state = self.decoder(next_word_embedding, curr_state) #output = [batch_size,1,hidden]
+            # output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (curr_state,curr_cell)) #output = [batch_size,1,hidden]
+            output, curr_state = self.decoder(next_word_embedding, curr_state) #output = [batch_size,1,hidden]
             output = self.dense(output) # [batch_size, 1 , vocab_size]
             outputs.append(output)
             softmax_output = F.softmax(output.squeeze(1),dim=1)
@@ -115,16 +115,16 @@ class Encoder_Decoder(nn.Module):
         embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
         
         #For LSTM
-        _, (hidden,cell)  = self.encoder(embedded_inputs)
-        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
-        cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
-        curr_state = hidden #[1,batch_size,hidden_size]
-        curr_cell = cell
+        # _, (hidden,cell)  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
+        # curr_cell = cell
 
         #For GRU
-        # _, hidden  = self.encoder(embedded_inputs)
-        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
-        # curr_state = hidden #[1,batch_size,hidden_size]
+        _, hidden  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
         #-------------------------------------------------------------------
 
         predictions = []
@@ -133,8 +133,8 @@ class Encoder_Decoder(nn.Module):
         counter = 0
         while True:
             counter += 1
-            output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (curr_state,curr_cell)) #output = [batch_size,1,hidden]
-            # output, curr_state = self.decoder(next_word_embedding, curr_state) #output = [batch_size,1,hidden]
+            # output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (curr_state,curr_cell)) #output = [batch_size,1,hidden]
+            output, curr_state = self.decoder(next_word_embedding, curr_state) #output = [batch_size,1,hidden]
             output = self.dense(output) # [batch_size, 1 , vocab_size]
             softmax_output = F.softmax(output.squeeze(1),dim=1)
             pred_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
@@ -169,15 +169,15 @@ class Old_VarGenerator(nn.Module):
 
         self.embedding = nn.Embedding(vocab_size, self.emb_dim)
         #Uncomment to use one-hot representation
-        self.embedding.weight.data = torch.eye(vocab_size)
-        self.embedding.weight.requires_grad=False
+        # self.embedding.weight.data = torch.eye(vocab_size)
+        # self.embedding.weight.requires_grad=False
 
-        self.hidden_to_mu = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
-        self.hidden_to_logsigma = nn.Linear(self.dec_hidden_dim,self.enc_hidden_dim)
+        self.hidden_to_mu = nn.Linear(self.dec_hidden_dim,self.dec_hidden_dim)
+        self.hidden_to_logsigma = nn.Linear(self.dec_hidden_dim,self.dec_hidden_dim)
         self.activation_function = nn.ReLU()
 
-        self.encoder = nn.GRU(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
-        self.decoder = nn.GRU(self.emb_dim+self.enc_hidden_dim, self.dec_hidden_dim, batch_first=True)
+        self.encoder = nn.LSTM(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
+        self.decoder = nn.LSTM(self.emb_dim, self.dec_hidden_dim, batch_first=True)
         self.dense = nn.Linear(self.dec_hidden_dim, vocab_size)
         self.dropout = nn.Dropout(DROPOUT)
 
@@ -194,48 +194,100 @@ class Old_VarGenerator(nn.Module):
     def compute_kld(self, mu, logsigma):
         kld = -0.5 * torch.sum(1+ logsigma - mu.pow(2) - logsigma.exp())
         return kld
-            
-    def forward(self, sequences, sequence_lengths, targets, target_lengths,tf_ratio=0.5):
-        ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]
-            targets   = [batch_size,max_len2], target_lengths = [batch_size] 
-            tf_ratio = TeacherForcing Ratio'''
-
-
+   
+    def suffix_prediction(self,sequences,sequence_lengths,targets):
         #---------Encoder----------------------------------------------------
         embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
         embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
-        _, hidden  = self.encoder(embedded_inputs)
+        
+        #For LSTM
+        _, (hidden,cell)  = self.encoder(embedded_inputs)
         hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
+        curr_cell = cell
+
+        #For GRU
+        # _, hidden  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
         #--------------------------------------------------------------------
         
         outputs = []
         ael_outputs  = []
-        curr_state = hidden #[1,batch_size,dec_hid_dim]
-        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #GO_ID tags
         kld = 0
 
+        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #GO_ID tags
+
         for i in range(1,targets.shape[1]):
-          
+            
             z, mu, logsigma = self.reparameterize(curr_state.squeeze(0)) # z,mu,logsigma=[batch,enc_hid_dim]
             kld += self.compute_kld(mu, logsigma)
-            decoder_input = torch.cat([next_word_embedding, z.unsqueeze(1)], -1)
-            output, curr_state = self.decoder(decoder_input, curr_state) #output = [batch_size,1,dec_hid_dim]
+            output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (z.unsqueeze(0),curr_cell)) #output = [batch_size,1,dec_hid_dim]
+            # output, curr_state = self.decoder(next_word_embedding, z.unsqueeze(0)) #output = [batch_size,1,dec_hid_dim]
             output = self.dropout(output)
-            predicted_output = self.dense(output) #[batch,1,vocab_size]
-            outputs.append(predicted_output)
+            output = self.dense(output) #[batch,1,vocab_size]
+            outputs.append(output)
 
-            teacher_forcing = random.random() < tf_ratio
+            softmax_output = F.softmax(output.squeeze(1),dim=1)
+            next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+            ael_outputs.append(next_word_embedding)
+
+            teacher_forcing = random.random() < TF
             if teacher_forcing:
                 next_word_embedding = self.embedding(targets[:,i].unsqueeze(1)) #[batch,1,emb_dim]
-            else :
-                softmax_output = F.log_softmax(predicted_output.squeeze(1),dim=-1)
-                # dec_inp_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
-                next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
-                ael_outputs.append(next_word_embedding)
-                # next_word_embedding = self.embedding(dec_inp_var)
 
         outputs = torch.cat(outputs, dim=1)
         ael_outputs = torch.cat(ael_outputs,dim=1)
+
+        return outputs,kld,ael_outputs
+
+    def infer(self,sequences,sequence_lengths,targets):
+        #-----------Encoder--------------------------------------------------
+        embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
+        embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
+        
+        #For LSTM
+        _, (hidden,cell)  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
+        curr_cell = cell
+
+        #For GRU
+        # _, hidden  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
+        #-------------------------------------------------------------------
+
+        predictions = []
+        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim]
+
+        counter = 0
+        while True:
+            counter += 1
+            z, mu, logsigma = self.reparameterize(curr_state.squeeze(0)) # z,mu,logsigma=[batch,enc_hid_dim]
+            output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (z.unsqueeze(0),curr_cell)) #output = [batch_size,1,hidden]
+            # output, curr_state = self.decoder(next_word_embedding, z.unsqueeze(0)) #output = [batch_size,1,hidden]
+            output = self.dense(output) # [batch_size, 1 , vocab_size]
+            softmax_output = F.softmax(output.squeeze(1),dim=1)
+            pred_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
+            predictions.append(pred_var.item())
+            if pred_var.item() == EOS_ID or len(predictions) > MAX_SUFX_LENGTH :
+                break
+            next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+
+        return predictions
+
+    def forward(self, sequences, sequence_lengths, targets,task):
+        ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]
+            targets   = [batch_size,max_len2]'''
+
+        if task =="next_activity_prediction":
+           outputs,kld,ael_outputs = self.next_activity_prediction(sequences,sequence_lengths,targets[:,:2])
+
+        elif task == "suffix_prediction":
+            outputs,kld,ael_outputs = self.suffix_prediction(sequences,sequence_lengths,targets)
 
         return outputs,kld,ael_outputs
         
@@ -244,21 +296,21 @@ class New_VarGenerator(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
         
-        self.emb_dim = vocab_size
+        self.emb_dim = EMBEDDING_DIM
         self.enc_hidden_dim = HIDDEN_SIZE
         self.dec_hidden_dim = 2*self.enc_hidden_dim
 
         self.embedding = nn.Embedding(vocab_size, self.emb_dim)
         #Uncomment to use one-hot representation
-        self.embedding.weight.data = torch.eye(vocab_size)
-        self.embedding.weight.requires_grad=False
+        # self.embedding.weight.data = torch.eye(vocab_size)
+        # self.embedding.weight.requires_grad=False
 
         self.hidden_to_mu = nn.Linear(self.dec_hidden_dim,self.dec_hidden_dim)
         self.hidden_to_logsigma = nn.Linear(self.dec_hidden_dim,self.dec_hidden_dim)
         self.activation_function = nn.ReLU()
 
-        self.encoder = nn.GRU(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
-        self.decoder = nn.GRU(self.emb_dim, self.dec_hidden_dim, batch_first=True)
+        self.encoder = nn.LSTM(self.emb_dim, self.enc_hidden_dim, batch_first=True, bidirectional=True)
+        self.decoder = nn.LSTM(self.emb_dim, self.dec_hidden_dim, batch_first=True)
         self.dense = nn.Linear(self.dec_hidden_dim, vocab_size)
         self.dropout = nn.Dropout(DROPOUT)
 
@@ -320,40 +372,85 @@ class New_VarGenerator(nn.Module):
         #---------Encoder----------------------------------------------------
         embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
         embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
-        _, hidden  = self.encoder(embedded_inputs)
+        
+        #For LSTM
+        _, (hidden,cell)  = self.encoder(embedded_inputs)
         hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
+        curr_cell = cell
+
+        #For GRU
+        # _, hidden  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
         #--------------------------------------------------------------------
         
         outputs = []
         ael_outputs  = []
-        curr_state = hidden #[1,batch_size,dec_hid_dim]
+        
         z, mu, logsigma = self.reparameterize(curr_state.squeeze(0)) # z,mu,logsigma=[batch,enc_hid_dim]
         kld = self.compute_kld(mu, logsigma)
         next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim] #GO_ID tags
 
         for i in range(1,targets.shape[1]):
-          
-            
-            decoder_input = torch.cat([next_word_embedding, z.unsqueeze(1)], -1)
-            output, curr_state = self.decoder(decoder_input, curr_state) #output = [batch_size,1,dec_hid_dim]
+    
+            output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (z.unsqueeze(0),curr_cell)) #output = [batch_size,1,dec_hid_dim]
+            # output, curr_state = self.decoder(next_word_embedding, z.unsqueeze(0)) #output = [batch_size,1,dec_hid_dim]
             output = self.dropout(output)
-            predicted_output = self.dense(output) #[batch,1,vocab_size]
-            outputs.append(predicted_output)
+            output = self.dense(output) #[batch,1,vocab_size]
+            outputs.append(output)
 
-            teacher_forcing = random.random() < tf_ratio
+            softmax_output = F.softmax(output.squeeze(1),dim=1)
+            next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+            ael_outputs.append(next_word_embedding)
+
+            teacher_forcing = random.random() < TF
             if teacher_forcing:
                 next_word_embedding = self.embedding(targets[:,i].unsqueeze(1)) #[batch,1,emb_dim]
-            else :
-                softmax_output = F.log_softmax(predicted_output.squeeze(1),dim=-1)
-                # dec_inp_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
-                next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
-                ael_outputs.append(next_word_embedding)
-                # next_word_embedding = self.embedding(dec_inp_var)
 
         outputs = torch.cat(outputs, dim=1)
         ael_outputs = torch.cat(ael_outputs,dim=1)
 
         return outputs,kld,ael_outputs
+
+    def infer(self,sequences,sequence_lengths,targets):
+        #-----------Encoder--------------------------------------------------
+        embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
+        embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)
+        
+        #For LSTM
+        _, (hidden,cell)  = self.encoder(embedded_inputs)
+        hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        cell = torch.cat((cell[-2,:,:], cell[-1,:,:]), dim = 1).unsqueeze(0)
+        curr_state = hidden #[1,batch_size,hidden_size]
+        curr_cell = cell
+
+        #For GRU
+        # _, hidden  = self.encoder(embedded_inputs)
+        # hidden = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1).unsqueeze(0)
+        # curr_state = hidden #[1,batch_size,hidden_size]
+        #-------------------------------------------------------------------
+
+        predictions = []
+        z, mu, logsigma = self.reparameterize(curr_state.squeeze(0)) # z,mu,logsigma=[batch,enc_hid_dim]
+        kld = self.compute_kld(mu, logsigma)
+        next_word_embedding = self.embedding(targets[:,0].unsqueeze(1)) #[batch,1,emb_dim]
+
+        counter = 0
+        while True:
+            counter += 1
+            output, (curr_state,curr_cell) = self.decoder(next_word_embedding, (z.unsqueeze(0),curr_cell)) #output = [batch_size,1,hidden]
+            # output, curr_state = self.decoder(next_word_embedding, z.unsqueeze(0)) #output = [batch_size,1,hidden]
+            output = self.dense(output) # [batch_size, 1 , vocab_size]
+            softmax_output = F.softmax(output.squeeze(1),dim=1)
+            pred_var = torch.max(softmax_output,dim=-1,keepdim=True)[1] #[batch_size,1]
+            predictions.append(pred_var.item())
+            if pred_var.item() == EOS_ID or len(predictions) > MAX_SUFX_LENGTH :
+                break
+            next_word_embedding = torch.mm(softmax_output,self.embedding.weight).unsqueeze(1)
+
+        return predictions
 
     def forward(self, sequences, sequence_lengths, targets,task):
         ''' sequences = [batch_size,max_len1], sequence_lengths = [batch_size]

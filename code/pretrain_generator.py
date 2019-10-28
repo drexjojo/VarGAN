@@ -11,8 +11,7 @@ from model import *
 from hyperparameters import *
 from data_process import *
 from utils import ModifiedLoss
-from sklearn.metrics import f1_score, precision_score,recall_score,accuracy_score
-# from jellyfish import damerau_levenshtein_distance
+# from sklearn.metrics import f1_score, precision_score,recall_score,accuracy_score
 from strsimpy.damerau import Damerau
 from strsimpy.optimal_string_alignment import OptimalStringAlignment
 DL_cal = Damerau()
@@ -36,16 +35,16 @@ def train_epoch(generator, train_loader, optimizer, device, loss_func):
 		batch_size = sequences.shape[0]
 
 		#For Enc-Dec with AEL
-		outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+		# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
 		
 		#For Conditional VAE with AEL
-		# outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+		outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
 
 		if TASK == "next_activity_prediction":
-			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size)
+			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size,kld)
 
 		elif TASK =="suffix_prediction":
-			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size)
+			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
 		
 
 		epoch_KL_loss += loss_dict["KLDLoss"]
@@ -80,16 +79,16 @@ def eval_epoch(generator, valid_loader, device, loss_func):
 			batch_size = sequences.shape[0]
 
 			#For Enc-Dec with AEL
-			outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+			# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
 
 			#For Conditional VAE with AEL
-			# outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+			outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
 
 			if TASK == "next_activity_prediction":
-				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size)
+				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size,kld)
 
 			elif TASK =="suffix_prediction":
-				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size)
+				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
 
 			epoch_KL_loss  += loss_dict["KLDLoss"]
 			epoch_CE_loss  += loss_dict["CELoss"]
@@ -205,11 +204,10 @@ if __name__ == '__main__':
 	model_data = torch.load("../data/Helpdesk/helpdesk.pt")
 	print("[INFO] -> Done!")
 
-	generator = Encoder_Decoder(vocab_size=len(model_data.word2index)).to(device)
+	generator = Old_VarGenerator(vocab_size=len(model_data.word2index)).to(device)
 	print("\nGenerator Parameters :")
 	print(generator)
 	print(f'The model has {sum(p.numel() for p in generator.parameters() if p.requires_grad):,} trainable parameters\n')
-
 
 	#-----------FOR TRAINING------------------------------------
 	pretrain_generator(device,model_data,generator)
