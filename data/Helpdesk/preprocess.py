@@ -3,13 +3,14 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import math
 # from constants import *
 from tqdm import tqdm
 from datetime import datetime
 from collections import Counter
 
 
-DATA_FILE = "helpdesk.csv"
+DATA_FILE = "Helpdesk.csv"
 SAVE_FILE = "helpdesk.pt"
 random_seed = 42
 
@@ -21,17 +22,55 @@ class Data_Model:
 		self.train_sufixes = []
 		self.test_prefixes = []
 		self.test_sufixes = []
-		self.word2index = {}
-		self.index2word = {}
+		self.activity_dict = {}
+		self.resource_dict = {}
+
+	#Max normalize the relative times
+	def max_norm(self,all_traces):
+		all_durations = [x[1] for trace in all_traces for x in trace ]
+		max_duration = max(all_durations)
+		new_traces = []
+		for trace in all_traces:
+			new_trace = [[x[0],x[1]/max_duration,x[2]] for x in trace]
+			new_traces.append(new_trace)
+
+		return new_traces
+
+	#Log normalize the relative times
+	def log_norm(self,all_traces):
+		log_durations = [math.log1p(x[1]) for trace in all_traces for x in trace ]
+		max_duration = max(log_durations)
+		new_traces = []
+		for trace in all_traces:
+			new_trace = [[x[0],math.log1p(x[1])/max_duration,x[2]] for x in trace]
+			new_traces.append(new_trace)
+			
+		return new_traces
 
 	#Fix trace according to timestamp
 	def fix_timestamp(self,cascade_dict):
 		all_traces = []
+		all_times = []
+
 		for key,value in cascade_dict.items():
 			cascade_dict[key].sort(key=lambda x:x[1])
-			trace = [i[0] for i in cascade_dict[key]]
+			trace = []
+			prev_t = cascade_dict[key][0][1]
+
+			for event in cascade_dict[key]:
+				time_elapsed = event[1]-prev_t
+				event_list = []
+				event_list.append(event[0])
+				event_list.append(time_elapsed.days + time_elapsed.seconds/(60*60*24))
+				all_times.append(time_elapsed.days + time_elapsed.seconds/(60*60*24))
+				event_list.append(event[2])
+				trace.append(event_list)
+				prev_t = event[1]
+
 			all_traces.append(trace)
 
+		all_traces = self.max_norm(all_traces)
+		durations = [x[1] for trace in all_traces for x in trace]
 		return all_traces
 
 	def read_data(self):
@@ -43,26 +82,32 @@ class Data_Model:
 				data.append(lis)
 
 		trace_dict = {}
-
+		self.activity_dict = {'<PAD>':0,'<GO>':1,'<EOS>':2}
+		self.resource_dict = {'<PAD>':0,'<GO>':1,'<EOS>':2}
+	
 		for row in tqdm(data,desc = " -> Reading data") :
-			caseID = row[0].strip()
-			activityID = row[1].strip()
-			t = time.strptime(row[2].strip(), "%Y-%m-%d %H:%M:%S")
+			caseID = int(row[0].strip()[5:-1])
+			activityID = row[1].strip()[1:-1]
+			resourceID = int(row[8].strip()[7:-1])
+	
+			t = time.strptime(row[2].strip()[1:-1], "%Y/%m/%d %H:%M:%S.%f")
 			timestamp = datetime.fromtimestamp(time.mktime(t))
+
+			if activityID not in self.activity_dict.keys():
+				self.activity_dict[activityID] = len(self.activity_dict) 
+
+			if resourceID not in self.resource_dict.keys():
+				self.resource_dict[resourceID] = len(self.resource_dict) 
 	  
 			if caseID in trace_dict.keys() :
-				trace_dict[caseID].append([activityID,timestamp])
+				trace_dict[caseID].append([activityID,timestamp,resourceID])
 			else:
-				trace_dict[caseID] = [[activityID,timestamp]]
-
+				trace_dict[caseID] = [[activityID,timestamp,resourceID]]
 
 		#All traces are already sorted based on timestamps
 		all_traces = self.fix_timestamp(trace_dict)
-
 		# plot_data(all_traces)
 
-		
-		self.word2index, self.index2word = self.get_vocab(all_traces)
 		train_traces, test_traces = self.split_data(all_traces)
 
 		self.train_prefixes = []
@@ -109,11 +154,11 @@ class Data_Model:
 
 		return train_traces, valid_traces
 
-	#Creating word2index and index2word
+	#Creating word2index and index2word/ NOT USED
 	def get_vocab(self,traces):
 		all_words = []
 		for seq in traces :
-			for i in seq :
+			for i in seq[0] :
 				all_words.append(i)
 
 		vocab =  ['<PAD>', '<GO>', '<EOS>'] + list(set(all_words))
@@ -139,11 +184,11 @@ def print_stats(model_data):
 	print("Number of datapoints : ",len(model_data.test_sufixes))
 	print("Example : ",model_data.test_sufixes[1])
 	print()
-	print("Word2Index :")
-	print("Number of datapoints : ",len(model_data.word2index))
+	print("Activity Dict :")
+	print("Number of activities : ",len(model_data.activity_dict))
 	print()
-	print("Index2Word :")
-	print("Number of datapoints : ",len(model_data.index2word))
+	print("Resource Dict :")
+	print("Number of resources : ",len(model_data.resource_dict))
 	print()
 
 def plot_data(all_traces):

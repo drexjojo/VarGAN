@@ -9,7 +9,7 @@ from torch.autograd import Function, Variable
 from hyperparameters import *
 from utils import *
 
-TF = 0.5
+TF = 0.5 #TeacherForcing Ratio
 
 #Encoder-Decoder model with AEL
 class Encoder_Decoder(nn.Module):
@@ -35,6 +35,7 @@ class Encoder_Decoder(nn.Module):
 
         outputs = []
         ael_outputs = []
+    
         #-----------Encoder--------------------------------------------------
         embedded_inputs = self.embedding(sequences) #[batch,max_len,emb_dim]
         embedded_inputs = nn.utils.rnn.pack_padded_sequence(embedded_inputs, sequence_lengths, batch_first=True)

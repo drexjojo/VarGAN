@@ -18,7 +18,7 @@ DL_cal = Damerau()
 OSA_cal = OptimalStringAlignment()
 
 SAVE_FILE = "../data/Helpdesk/trained_models/New_VarGAN.chkpt"
-TASK = "suffix_prediction"
+TASK = "next_activity_prediction"
 
 def train_epoch(generator, train_loader, optimizer, device, loss_func):
 	generator.train()
@@ -35,16 +35,22 @@ def train_epoch(generator, train_loader, optimizer, device, loss_func):
 		batch_size = sequences.shape[0]
 
 		#For Enc-Dec with AEL
-		# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
-		
-		#For Conditional VAE with AEL
-		outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+		outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
 
 		if TASK == "next_activity_prediction":
-			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size,kld)
+			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size)
 
 		elif TASK =="suffix_prediction":
-			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
+			loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size)
+		
+		#For Conditional VAE with AEL
+		# outputs,kld,ael_outputs = generator(prefix_activities,prefix_lengths,suffix_activites,task=TASK)
+
+		# if TASK == "next_activity_prediction":
+		# 	loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size,kld)
+
+		# elif TASK =="suffix_prediction":
+		# 	loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
 		
 
 		epoch_KL_loss += loss_dict["KLDLoss"]
@@ -79,16 +85,22 @@ def eval_epoch(generator, valid_loader, device, loss_func):
 			batch_size = sequences.shape[0]
 
 			#For Enc-Dec with AEL
-			# outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
-
-			#For Conditional VAE with AEL
-			outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+			outputs,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
 
 			if TASK == "next_activity_prediction":
-				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size,kld)
+				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size)
 
 			elif TASK =="suffix_prediction":
-				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
+				loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size)
+
+			#For Conditional VAE with AEL
+			# outputs,kld,ael_outputs = generator(sequences,sequence_lengths,targets,task=TASK)
+
+			# if TASK == "next_activity_prediction":
+			# 	loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1],batch_size,kld)
+
+			# elif TASK =="suffix_prediction":
+			# 	loss,loss_dict,accuracy = loss_func.compute_batch_loss(outputs,targets[:,1:],batch_size,kld)
 
 			epoch_KL_loss  += loss_dict["KLDLoss"]
 			epoch_CE_loss  += loss_dict["CELoss"]
@@ -185,14 +197,16 @@ def pretrain_generator(device,model_data,generator):
 	train_dset = Driver_Data(
 		data    = model_data.train_prefixes,
 		targets = model_data.train_sufixes,
-		word2index = model_data.word2index)
+		activity_dict = model_data.activity_dict,
+		resource_dict = model_data.resource_dict)
 
 	train_loader = DataLoader(train_dset, batch_size = BATCH_SIZE,shuffle = True, num_workers = 10,collate_fn=pack_collate_fn) #Load training data
 
 	valid_dset = Driver_Data(
 		data = model_data.test_prefixes,
 		targets = model_data.test_sufixes,
-		word2index = model_data.word2index)
+		activity_dict = model_data.activity_dict,
+		resource_dict = model_data.resource_dict)
 
 	valid_loader = DataLoader(valid_dset, batch_size = BATCH_SIZE, shuffle = False, num_workers = 10,collate_fn=pack_collate_fn) #Load Validation data
 	train_generator(generator, train_loader, valid_loader, optimizer, device, loss_func)
@@ -204,7 +218,7 @@ if __name__ == '__main__':
 	model_data = torch.load("../data/Helpdesk/helpdesk.pt")
 	print("[INFO] -> Done!")
 
-	generator = Old_VarGenerator(vocab_size=len(model_data.word2index)).to(device)
+	generator = Encoder_Decoder(vocab_size=len(model_data.activity_dict)).to(device)
 	print("\nGenerator Parameters :")
 	print(generator)
 	print(f'The model has {sum(p.numel() for p in generator.parameters() if p.requires_grad):,} trainable parameters\n')

@@ -10,15 +10,15 @@ class Data_Model:
 		self.train_sufixes = []
 		self.test_prefixes = []
 		self.test_sufixes = []
-		self.word2index = {}
-		self.index2word = {}
+		self.activity_dict = {}
+		self.resource_dict = {}
 
 	
 class Driver_Data(Dataset):
-	def __init__(self,data,targets,word2index):
+	def __init__(self,data,targets,activity_dict,resource_dict):
 		self.data = data
 		self.targets = targets
-		self.word2index = word2index
+		self.activity_dict = activity_dict
 		if len(self.targets) != len(self.data):
 			print("[INFO] -> ERROR in Driver Data !")
 			exit(0)
@@ -39,22 +39,22 @@ class Driver_Data(Dataset):
 			exit(0)
 		indices = []
 		for word in sequence:
-			if word in self.word2index.keys():
-				indices.append(self.word2index[word])
-			else:
-				indices.append(self.word2index["<UNK>"])
-		return indices
-
-	def get_target_sequence(self,sequence):
-		indices = [self.word2index["<GO>"]]
-		for word in sequence:
-			if word in self.word2index.keys():
-				indices.append(self.word2index[word])
+			if word[0] in self.activity_dict.keys():
+				indices.append(self.activity_dict[word[0]])
 			else:
 				print("UNK found")
 				exit(0)
-				indices.append(self.word2index["<UNK>"])
-		indices.append(self.word2index["<EOS>"])
+		return indices
+
+	def get_target_sequence(self,sequence):
+		indices = [self.activity_dict["<GO>"]]
+		for word in sequence:
+			if word[0] in self.activity_dict.keys():
+				indices.append(self.activity_dict[word[0]])
+			else:
+				print("UNK found")
+				exit(0)
+		indices.append(self.activity_dict["<EOS>"])
 		return indices
 
 	def __len__(self):
