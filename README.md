@@ -1,10 +1,8 @@
 # VarGAN
 
-1) Preprocessing
-  -> python3 preprocess.py
-2) Pre-training generator
+1) Pre-training generator
   -> python3 pretrain_generator.py
-3) Pre-training discriminator
+2) Pre-training discriminator
   -> python3 pretrain_discriminator.py
-4) GAN training
+3) GAN training
   -> python3 adversarial_training.py
